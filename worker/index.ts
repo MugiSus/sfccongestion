@@ -3,7 +3,7 @@ interface Env {
 }
 
 const API_PREFIX = '/api'
-const API_ORIGIN = 'https://api.dtc.wide.ad.jp'
+const API_ORIGIN = 'http://localhost:3000'
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -11,7 +11,8 @@ export default {
     if (!url.pathname.startsWith(`${API_PREFIX}/`)) {
       return env.ASSETS.fetch(request)
     }
-    const target = new URL(url.pathname.slice(API_PREFIX.length) + url.search, API_ORIGIN)
+    const origin = url.pathname.startsWith('/api/wifi/') ? 'https://api.dtc.wide.ad.jp' : API_ORIGIN
+    const target = new URL(url.pathname.slice(API_PREFIX.length) + url.search, origin)
     return fetch(target, { method: request.method, headers: request.headers })
   },
 }

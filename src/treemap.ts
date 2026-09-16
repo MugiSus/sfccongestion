@@ -1,104 +1,67 @@
-export interface TreemapItem<T> {
-  value: number
-  data: T
+import { stratify, treemap } from 'd3-hierarchy'
+
+export interface WifiClient {
+  accessPointName: string
+  buildingKey?: string
 }
 
-export interface TreemapRect<T> {
-  x: number
-  y: number
-  width: number
-  height: number
-  value: number
-  data: T
+export interface WifiSnapshot {
+  measuredAt: string
+  clients: WifiClient[]
 }
 
-function sum(values: number[]): number {
-  let total = 0
-  for (const value of values) total += value
-  return total
+export interface AccessPointNode {
+  id: string
+  parentId: string | undefined
+  name: string
+  kind: 'campus' | 'building' | 'floor' | 'ap'
+  clients: number
 }
 
-function worstAspect(areas: number[], length: number): number {
-  let total = 0
-  let max = 0
-  let min = Number.POSITIVE_INFINITY
-  for (const area of areas) {
-    total += area
-    if (area > max) max = area
-    if (area < min) min = area
-  }
-  const totalSquared = total * total
-  const lengthSquared = length * length
-  return Math.max((lengthSquared * max) / totalSquared, totalSquared / (lengthSquared * min))
-}
+export function buildAccessPointHierarchy(clients: WifiClient[]) {
+  const nodes = new Map<string, AccessPointNode>()
+  nodes.set('campus', {
+    id: 'campus', parentId: undefined, name: 'SFC', kind: 'campus', clients: 0,
+  })
 
-function layoutRow<T>(
-  items: TreemapItem<T>[],
-  areas: number[],
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  out: TreemapRect<T>[],
-): void {
-  if (items.length === 0 || width <= 0 || height <= 0) return
+  for (const client of clients) {
+    const name = client.accessPointName
+    const location = /^ap-(.+?)-(\d+f|b\d+|bf|rf)(?:-|$)/.exec(name)
+    const building = client.buildingKey ?? location?.[1] ?? 'unknown'
+    const floor = location?.[2] ?? '階不明'
+    const buildingId = JSON.stringify([building])
+    const floorId = JSON.stringify([building, floor])
+    const apId = JSON.stringify([building, floor, name])
 
-  const vertical = width >= height
-  const length = vertical ? height : width
-  let count = 1
-  let best = worstAspect([areas[0]], length)
-  while (count < areas.length) {
-    const candidate = worstAspect(areas.slice(0, count + 1), length)
-    if (candidate > best) break
-    best = candidate
-    count += 1
-  }
-
-  const rowTotal = sum(areas.slice(0, count))
-  if (vertical) {
-    const rowWidth = rowTotal / height
-    let offset = y
-    for (let i = 0; i < count; i += 1) {
-      const cellHeight = areas[i] / rowWidth
-      out.push({
-        x,
-        y: offset,
-        width: rowWidth,
-        height: cellHeight,
-        value: items[i].value,
-        data: items[i].data,
+    if (!nodes.has(buildingId)) {
+      nodes.set(buildingId, {
+        id: buildingId, parentId: 'campus', name: building, kind: 'building', clients: 0,
       })
-      offset += cellHeight
     }
-    layoutRow(items.slice(count), areas.slice(count), x + rowWidth, y, width - rowWidth, height, out)
-  } else {
-    const rowHeight = rowTotal / width
-    let offset = x
-    for (let i = 0; i < count; i += 1) {
-      const cellWidth = areas[i] / rowHeight
-      out.push({
-        x: offset,
-        y,
-        width: cellWidth,
-        height: rowHeight,
-        value: items[i].value,
-        data: items[i].data,
+    if (!nodes.has(floorId)) {
+      nodes.set(floorId, {
+        id: floorId, parentId: buildingId, name: floor, kind: 'floor', clients: 0,
       })
-      offset += cellWidth
     }
-    layoutRow(items.slice(count), areas.slice(count), x, y + rowHeight, width, height - rowHeight, out)
+    const ap = nodes.get(apId)
+    if (ap) {
+      ap.clients += 1
+    } else {
+      nodes.set(apId, {
+        id: apId, parentId: floorId, name, kind: 'ap', clients: 1,
+      })
+    }
   }
+
+  return stratify<AccessPointNode>()([...nodes.values()])
+    .sum((node) => node.clients)
+    .sort((a, b) => (b.value ?? 0) - (a.value ?? 0) || a.id!.localeCompare(b.id!))
 }
 
-export function squarify<T>(items: TreemapItem<T>[], width: number, height: number): TreemapRect<T>[] {
-  const positive = items.filter((item) => item.value > 0)
-  if (positive.length === 0 || width <= 0 || height <= 0) return []
-
-  const sorted = [...positive].sort((a, b) => b.value - a.value)
-  const total = sum(sorted.map((item) => item.value))
-  const scale = (width * height) / total
-  const areas = sorted.map((item) => item.value * scale)
-  const out: TreemapRect<T>[] = []
-  layoutRow(sorted, areas, 0, 0, width, height, out)
-  return out
-}
+export const layoutAccessPoints = treemap<AccessPointNode>()
+  .paddingInner(2)
+  .paddingOuter(3)
+  .paddingTop((node) => {
+    if (node.depth === 0 || node.x1 - node.x0 < 40 || node.y1 - node.y0 < 48) return 3
+    return node.depth === 1 ? 20 : 16
+  })

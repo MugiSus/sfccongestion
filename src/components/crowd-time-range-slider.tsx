@@ -4,15 +4,6 @@ import { Slider, SliderFill, SliderThumb, SliderTrack } from '@/components/ui/sl
 const CURVE_WIDTH = 48
 const CURVE_SMOOTHING_RADIUS = 3
 const CURVE_MAX_SAMPLES = 600
-const SLIDER_STEP_MINUTES = 5
-
-export function sliderStep(intervalMs: number): number {
-  return Math.max(1, Math.round((SLIDER_STEP_MINUTES * 60_000) / intervalMs))
-}
-
-export function maxSelectableIndex(pointCount: number, step: number): number {
-  return Math.max(pointCount - 1 - ((pointCount - 1) % step), 0)
-}
 
 const TIME_FORMATTER = new Intl.DateTimeFormat('ja-JP', {
   timeZone: 'Asia/Tokyo',
@@ -48,8 +39,7 @@ export default function CrowdTimeRangeSlider(props: CrowdTimeRangeSliderProps) {
       }
     | undefined
 
-  const stepSize = () => sliderStep(props.intervalMs)
-  const maxValue = () => maxSelectableIndex(props.pointCount, stepSize())
+  const maxValue = () => Math.max(props.pointCount - 1, 0)
   const formatTime = (index: number) =>
     TIME_FORMATTER.format(new Date(props.startTimeMs + index * props.intervalMs))
 
@@ -85,7 +75,7 @@ export default function CrowdTimeRangeSlider(props: CrowdTimeRangeSliderProps) {
   })
 
   const clampIndex = (value: number) => {
-    const snapped = Math.round(value / stepSize()) * stepSize()
+    const snapped = Math.round(value)
     return Math.min(Math.max(snapped, 0), maxValue())
   }
 
@@ -100,7 +90,7 @@ export default function CrowdTimeRangeSlider(props: CrowdTimeRangeSliderProps) {
       value={props.value}
       minValue={0}
       maxValue={maxValue()}
-      step={stepSize()}
+      step={1}
       orientation="vertical"
       inverted
       onChange={(values) => emitRange(values[0], values[1])}
@@ -156,12 +146,9 @@ export default function CrowdTimeRangeSlider(props: CrowdTimeRangeSliderProps) {
             event.stopPropagation()
 
             const rangeLength = rangeDrag.endValue - rangeDrag.startValue
-            const indexDelta =
-              Math.round(
-                (((event.clientY - rangeDrag.pointerStartY) / rangeDrag.trackHeight) *
-                  maxValue()) /
-                  stepSize(),
-              ) * stepSize()
+            const indexDelta = Math.round(
+              ((event.clientY - rangeDrag.pointerStartY) / rangeDrag.trackHeight) * maxValue(),
+            )
             const nextStartValue = Math.min(
               Math.max(rangeDrag.startValue + indexDelta, 0),
               maxValue() - rangeLength,
