@@ -1,83 +1,40 @@
-import { Index, Show, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
-import CrowdTimeRangeSlider, {
-  maxSelectableIndex,
-  sliderStep,
-} from '@/components/crowd-time-range-slider'
+import { Index, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
+import CrowdTimeRangeSlider from '@/components/crowd-time-range-slider'
+import { fetchBuildings, fetchCrowdPoint, RateLimitError, type CrowdBuilding, type CrowdPoint } from './crowd'
 import { squarify, type TreemapRect } from './treemap'
 
-const STREAM_URL = '/api/crowd/stream'
-const RANGE_URL = '/api/crowd/range'
-const RANGE_DOMAIN_MS = 24 * 60 * 60 * 1000
-const RANGE_REFRESH_MS = 5 * 60 * 1000
-const RANGE_ALIGN_MS = 5 * 60 * 1000
-const DEFAULT_WINDOW_MINUTES = 60
+const GRID_INTERVAL_MS = 60 * 60 * 1000
+const GRID_HALF_POINTS = 24
+const GRID_POINT_COUNT = GRID_HALF_POINTS * 2 + 1
+const NOW_INDEX = GRID_HALF_POINTS
+const DEFAULT_WINDOW_POINTS = 2
+const REQUEST_GAP_MS = 125
+const RETRY_DELAY_MS = 3000
+const SCAN_INTERVAL_MS = 5 * 60 * 1000
+const NOW_TICK_MS = 60 * 1000
+const CURRENT_TTL_MS = 5 * 60 * 1000
+const NEAR_TTL_MS = 15 * 60 * 1000
+const FAR_TTL_MS = 60 * 60 * 1000
+const UNAVAILABLE_RETRY_MS = 60 * 60 * 1000
+const NEAR_HORIZON_MS = 3 * 60 * 60 * 1000
+const STORAGE_KEY = 'sfccongestion:crowd:v1'
+const STORAGE_MAX_AGE_MS = 50 * 60 * 60 * 1000
+const STORAGE_SAVE_DELAY_MS = 5000
 
-const BUILDING_KEYS = [
-  'alpha',
-  'delta',
-  'epsilon',
-  'iota',
-  'kappa',
-  'lambda',
-  'lounge',
-  'mu',
-  'omega',
-  'omicron',
-  'pe-buildings',
-  'sigma',
-  'tau',
-  'theta',
-]
+interface Grid {
+  startMs: number
+  intervalMs: number
+  pointCount: number
+}
 
-const BUILDING_NAMES: Record<string, string> = {
-  alpha: 'Alpha',
-  delta: 'Delta',
-  epsilon: 'Epsilon',
-  iota: 'Iota',
-  kappa: 'Kappa',
-  lambda: 'Lambda',
-  lounge: 'Lounge',
-  mu: 'Mu',
-  omega: 'Omega',
-  omicron: 'Omicron',
-  'pe-buildings': 'PE Buildings',
-  sigma: 'Sigma',
-  tau: 'Tau',
-  theta: 'Theta',
+interface CacheEntry {
+  point: CrowdPoint | null
+  fetchedAt: number
 }
 
 interface Reading {
-  buildingKey: string
-  crowdLevel: number | null
-  apClientCount: number | null
-}
-
-interface Snapshot {
-  readings?: Reading[]
-}
-
-interface RangeReading {
-  buildingKey: string
-  crowdLevels?: (number | null)[]
-  apClientCounts?: (number | null)[]
-}
-
-interface RangeResponse {
-  startTime?: string
-  endTime?: string
-  readings?: RangeReading[]
-}
-
-interface BuildingSeries {
-  levels: (number | null)[]
-  counts: (number | null)[]
-}
-
-interface RangeSeries {
-  startTimeMs: number
-  intervalMs: number
-  pointCount: number
-  buildings: Map<string, BuildingSeries>
+  utilization: number | null
+  people: number | null
 }
 
 interface Viewport {
@@ -91,103 +48,69 @@ interface CellProps {
   reading: () => Reading | undefined
 }
 
-async function fetchRange(startMs: number, endMs: number): Promise<RangeSeries | null> {
-  const query = new URLSearchParams({
-    startTime: new Date(startMs).toISOString(),
-    endTime: new Date(endMs).toISOString(),
-  })
-  const response = await fetch(`${RANGE_URL}?${query}`)
-  if (!response.ok) return null
-  const data = (await response.json()) as RangeResponse
-  const list = data.readings
-  if (!Array.isArray(list) || list.length === 0 || !data.startTime || !data.endTime) return null
-  const pointCount = list[0].crowdLevels?.length ?? 0
-  if (pointCount === 0) return null
-  const startTimeMs = Date.parse(data.startTime)
-  const endTimeMs = Date.parse(data.endTime)
-  const intervalMs = (endTimeMs - startTimeMs) / pointCount
-  if (!Number.isFinite(intervalMs) || intervalMs <= 0) return null
-  const buildings = new Map<string, BuildingSeries>()
-  for (const reading of list) {
-    buildings.set(reading.buildingKey, {
-      levels: reading.crowdLevels ?? [],
-      counts: reading.apClientCounts ?? [],
-    })
+function alignHour(ms: number): number {
+  return Math.floor(ms / GRID_INTERVAL_MS) * GRID_INTERVAL_MS
+}
+
+function buildGrid(nowMs: number): Grid {
+  return {
+    startMs: alignHour(nowMs) - GRID_HALF_POINTS * GRID_INTERVAL_MS,
+    intervalMs: GRID_INTERVAL_MS,
+    pointCount: GRID_POINT_COUNT,
   }
-  return { startTimeMs, intervalMs, pointCount, buildings }
 }
 
-function totalPoints(series: RangeSeries): number {
-  return series.pointCount + 1
+function pointKey(building: string, timestamp: number): string {
+  return `${building}|${timestamp}`
 }
 
-function lastSelectableIndex(series: RangeSeries): number {
-  return maxSelectableIndex(totalPoints(series), sliderStep(series.intervalMs))
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
 
-function aggregateRange(
-  series: RangeSeries,
-  start: number,
-  end: number,
-  live: Map<string, Reading>,
-): Map<string, Reading> {
-  const result = new Map<string, Reading>()
-  const buildingKeys = new Set<string>([...series.buildings.keys(), ...live.keys()])
-  for (const buildingKey of buildingKeys) {
-    const building = series.buildings.get(buildingKey)
-    let levelSum = 0
-    let levelCount = 0
-    let clientSum = 0
-    let clientCount = 0
-    for (let index = start; index <= end; index += 1) {
-      if (building && index < series.pointCount) {
-        const level = building.levels[index]
-        if (level != null) {
-          levelSum += level
-          levelCount += 1
-        }
-        const clients = building.counts[index]
-        if (clients != null) {
-          clientSum += clients
-          clientCount += 1
-        }
-        continue
-      }
-      const reading = live.get(buildingKey)
-      if (!reading) continue
-      if (reading.crowdLevel != null) {
-        levelSum += reading.crowdLevel
-        levelCount += 1
-      }
-      if (reading.apClientCount != null) {
-        clientSum += reading.apClientCount
-        clientCount += 1
+function loadStoredPoints(): Map<string, CacheEntry> {
+  const entries = new Map<string, CacheEntry>()
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY)
+    if (!raw) return entries
+    const stored = JSON.parse(raw) as [string, CrowdPoint][]
+    const cutoffMs = Date.now() - STORAGE_MAX_AGE_MS
+    for (const [key, point] of stored) {
+      if (point && point.timestamp * 1000 >= cutoffMs) {
+        entries.set(key, { point, fetchedAt: 0 })
       }
     }
-    result.set(buildingKey, {
-      buildingKey,
-      crowdLevel: levelCount === 0 ? null : Math.round(levelSum / levelCount),
-      apClientCount: clientCount === 0 ? null : Math.round(clientSum / clientCount),
-    })
+  } catch {
+    return new Map()
   }
-  return result
+  return entries
+}
+
+function isStale(entry: CacheEntry | undefined, timestamp: number, nowMs: number): boolean {
+  if (!entry) return true
+  if (entry.point === null) return nowMs - entry.fetchedAt >= UNAVAILABLE_RETRY_MS
+  if (timestamp + GRID_INTERVAL_MS <= nowMs) return false
+  const age = nowMs - entry.fetchedAt
+  if (timestamp <= nowMs) return age >= CURRENT_TTL_MS
+  if (timestamp <= nowMs + NEAR_HORIZON_MS) return age >= NEAR_TTL_MS
+  return age >= FAR_TTL_MS
 }
 
 function displayName(key: string): string {
-  return BUILDING_NAMES[key] ?? key.charAt(0).toUpperCase() + key.slice(1).replace(/-/g, ' ')
+  return key.charAt(0).toUpperCase() + key.slice(1).replace(/-/g, ' ')
 }
 
-function levelColor(level: number | null | undefined): string {
-  if (level == null) return 'hsl(215 10% 26%)'
-  const ratio = Math.min(Math.max(level, 0), 100) / 100
+function utilizationColor(utilization: number | null | undefined): string {
+  if (utilization == null) return 'hsl(215 10% 26%)'
+  const ratio = Math.min(Math.max(utilization, 0), 1)
   return `hsl(${(1 - ratio) * 130} 68% 41%)`
 }
 
 function statsText(reading: Reading | undefined): string {
   if (!reading) return ''
-  const level = reading.crowdLevel == null ? '–' : `${reading.crowdLevel}%`
-  const count = reading.apClientCount == null ? '–' : `${reading.apClientCount}`
-  return `${level} · ${count}`
+  const utilization = reading.utilization == null ? '–' : `${Math.round(reading.utilization * 100)}%`
+  const people = reading.people == null ? '–' : `${Math.round(reading.people)}人`
+  return `${utilization} · ${people}`
 }
 
 function longestWord(value: string): string {
@@ -236,7 +159,7 @@ function Cell(props: CellProps) {
       top: `${rect.y + 2}px`,
       width: `${Math.max(rect.width - 4, 0)}px`,
       height: `${Math.max(rect.height - 4, 0)}px`,
-      'background-color': levelColor(props.reading()?.crowdLevel),
+      'background-color': utilizationColor(props.reading()?.utilization),
     }
   }
 
@@ -270,46 +193,81 @@ function Cell(props: CellProps) {
 }
 
 export default function App() {
-  const [liveReadings, setLiveReadings] = createSignal<Map<string, Reading>>(new Map())
-  const [series, setSeries] = createSignal<RangeSeries | null>(null)
+  const cache = loadStoredPoints()
+  const [buildings, setBuildings] = createSignal<CrowdBuilding[]>([])
+  const [nowMs, setNowMs] = createSignal(alignHour(Date.now()))
   const [selection, setSelection] = createSignal<[number, number]>([0, 0])
-  const [keys, setKeys] = createSignal<string[]>(BUILDING_KEYS)
+  const [version, setVersion] = createSignal(0)
   const [viewport, setViewport] = createSignal<Viewport>({
     width: window.innerWidth,
     height: window.innerHeight,
   })
 
+  const grid = createMemo<Grid>((previous) => {
+    const next = buildGrid(nowMs())
+    return previous && previous.startMs === next.startMs ? previous : next
+  })
+
+  let previousStartMs = 0
+  createEffect(() => {
+    const current = grid()
+    if (previousStartMs === 0) {
+      previousStartMs = current.startMs
+      return
+    }
+    const delta = Math.round((current.startMs - previousStartMs) / current.intervalMs)
+    previousStartMs = current.startMs
+    if (delta === 0) return
+    setSelection(([start, end]) => {
+      const last = current.pointCount - 1
+      const nextStart = Math.min(Math.max(start + delta, 0), last)
+      const nextEnd = Math.min(Math.max(end + delta, nextStart), last)
+      return [nextStart, nextEnd]
+    })
+  })
+
   const readings = createMemo(() => {
-    const value = series()
-    if (!value) return liveReadings()
+    version()
+    const current = grid()
     const [start, end] = selection()
-    return aggregateRange(value, start, end, liveReadings())
+    const result = new Map<string, Reading>()
+    for (const building of buildings()) {
+      let utilizationSum = 0
+      let peopleSum = 0
+      let count = 0
+      for (let index = start; index <= end; index += 1) {
+        const entry = cache.get(pointKey(building.name, current.startMs + index * current.intervalMs))
+        if (!entry?.point) continue
+        utilizationSum += entry.point.seatUtilization
+        peopleSum += entry.point.estimatedPeople
+        count += 1
+      }
+      result.set(building.name, count === 0
+        ? { utilization: null, people: null }
+        : { utilization: utilizationSum / count, people: peopleSum / count })
+    }
+    return result
   })
 
   const activity = createMemo(() => {
-    const value = series()
-    if (!value) return []
-    const totals = new Array<number>(totalPoints(value)).fill(0)
-    for (const building of value.buildings.values()) {
-      for (let index = 0; index < value.pointCount; index += 1) {
-        const clients = building.counts[index]
-        if (clients != null) totals[index] += clients
+    version()
+    const current = grid()
+    const totals = new Array<number>(current.pointCount).fill(0)
+    for (const building of buildings()) {
+      for (let index = 0; index < current.pointCount; index += 1) {
+        const entry = cache.get(pointKey(building.name, current.startMs + index * current.intervalMs))
+        if (entry?.point) totals[index] += entry.point.estimatedPeople
       }
     }
-    let liveTotal = 0
-    for (const reading of liveReadings().values()) {
-      if (reading.apClientCount != null) liveTotal += reading.apClientCount
-    }
-    totals[value.pointCount] = liveTotal
     return totals
   })
 
   const layout = createMemo(() => {
     const { width, height } = viewport()
     const current = readings()
-    const items = keys().map((key) => ({
-      value: Math.max(current.get(key)?.apClientCount ?? 0, 1),
-      data: key,
+    const items = buildings().map((building) => ({
+      value: Math.max(current.get(building.name)?.people ?? 0, 1),
+      data: building.name,
     }))
     return new Map(squarify(items, width, height).map((rect) => [rect.data, rect]))
   })
@@ -317,94 +275,130 @@ export default function App() {
   onMount(() => {
     const handleResize = () => setViewport({ width: window.innerWidth, height: window.innerHeight })
     window.addEventListener('resize', handleResize)
-
-    const source = new EventSource(STREAM_URL)
-    const handleMessage = (event: Event) => {
-      let snapshot: Snapshot
-      try {
-        snapshot = JSON.parse((event as MessageEvent<string>).data) as Snapshot
-      } catch {
-        return
-      }
-      const list = snapshot.readings
-      if (!Array.isArray(list)) return
-      const next = new Map<string, Reading>()
-      for (const reading of list) next.set(reading.buildingKey, reading)
-      setLiveReadings(next)
-      setKeys((prev) => {
-        const added = list.filter((reading) => !prev.includes(reading.buildingKey))
-        return added.length === 0 ? prev : [...prev, ...added.map((reading) => reading.buildingKey)]
-      })
-    }
-    source.addEventListener('building-crowd-snapshot', handleMessage)
-    source.addEventListener('message', handleMessage)
-
+    const controller = new AbortController()
+    const queue: { building: string, timestamp: number, attempts: number }[] = []
+    const queued = new Set<string>()
+    let pumping = false
     let disposed = false
-    const loadRange = async () => {
-      const endMs = Math.floor(Date.now() / RANGE_ALIGN_MS) * RANGE_ALIGN_MS
-      const next = await fetchRange(endMs - RANGE_DOMAIN_MS, endMs)
-      if (!next || disposed) return
-      const previous = series()
-      const [previousStart, previousEnd] = selection()
-      setSeries(next)
-      setKeys((prev) => {
-        const added = [...next.buildings.keys()].filter((key) => !prev.includes(key))
-        return added.length === 0 ? prev : [...prev, ...added]
-      })
-      const step = sliderStep(next.intervalMs)
-      const lastIndex = maxSelectableIndex(totalPoints(next), step)
-      if (!previous) {
-        const windowPoints = Math.round((DEFAULT_WINDOW_MINUTES * 60_000) / next.intervalMs)
-        const start = Math.max(lastIndex - windowPoints, 0)
-        setSelection([start - (start % step), lastIndex])
-        return
-      }
-      if (previousEnd >= lastSelectableIndex(previous)) {
-        const windowLength = previousEnd - previousStart
-        const start = Math.max(lastIndex - windowLength, 0)
-        setSelection([start - (start % step), lastIndex])
-        return
-      }
-      const startTimeMs = previous.startTimeMs + previousStart * previous.intervalMs
-      const endTimeMs = previous.startTimeMs + previousEnd * previous.intervalMs
-      const toIndex = (timeMs: number) => {
-        const snapped = Math.round((timeMs - next.startTimeMs) / next.intervalMs / step) * step
-        return Math.min(Math.max(snapped, 0), lastIndex)
-      }
-      const start = toIndex(startTimeMs)
-      setSelection([start, Math.max(toIndex(endTimeMs), start)])
+    let saveTimer: number | undefined
+
+    const scheduleSave = () => {
+      if (saveTimer !== undefined) return
+      saveTimer = window.setTimeout(() => {
+        saveTimer = undefined
+        const cutoffMs = Date.now() - STORAGE_MAX_AGE_MS
+        const stored: [string, CrowdPoint][] = []
+        for (const [key, entry] of cache) {
+          if (entry.point && entry.point.timestamp * 1000 >= cutoffMs) stored.push([key, entry.point])
+        }
+        try {
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(stored))
+        } catch {
+          window.localStorage.removeItem(STORAGE_KEY)
+        }
+      }, STORAGE_SAVE_DELAY_MS)
     }
-    void loadRange()
-    const refreshTimer = window.setInterval(() => void loadRange(), RANGE_REFRESH_MS)
+
+    const enqueue = (building: string, timestamp: number, attempts = 0) => {
+      const key = pointKey(building, timestamp)
+      if (queued.has(key)) return
+      queued.add(key)
+      queue.push({ building, timestamp, attempts })
+    }
+
+    const pump = async () => {
+      if (pumping || disposed) return
+      pumping = true
+      while (queue.length > 0 && !disposed) {
+        const task = queue.shift()!
+        const key = pointKey(task.building, task.timestamp)
+        queued.delete(key)
+        try {
+          const point = await fetchCrowdPoint(task.building, task.timestamp, controller.signal)
+          cache.set(key, { point, fetchedAt: Date.now() })
+          setVersion((value) => value + 1)
+          scheduleSave()
+        } catch (error) {
+          if (disposed || controller.signal.aborted) break
+          if (error instanceof RateLimitError) {
+            await delay(error.retryAfterMs)
+            if (!disposed) enqueue(task.building, task.timestamp, task.attempts)
+          } else if (task.attempts < 2) {
+            await delay(RETRY_DELAY_MS)
+            if (!disposed) enqueue(task.building, task.timestamp, task.attempts + 1)
+          }
+        }
+        if (!disposed) await delay(REQUEST_GAP_MS)
+      }
+      pumping = false
+    }
+
+    const scan = () => {
+      const list = buildings()
+      if (list.length === 0) return
+      const nowMs = Date.now()
+      const currentHourMs = alignHour(nowMs)
+      const offsets = [0]
+      for (let offset = 1; offset <= GRID_HALF_POINTS; offset += 1) {
+        offsets.push(offset, -offset)
+      }
+      for (const offset of offsets) {
+        const timestamp = currentHourMs + offset * GRID_INTERVAL_MS
+        for (const building of list) {
+          const entry = cache.get(pointKey(building.name, timestamp))
+          if (isStale(entry, timestamp, nowMs)) enqueue(building.name, timestamp)
+        }
+      }
+      void pump()
+    }
+
+    const loadBuildings = async () => {
+      try {
+        const list = await fetchBuildings(controller.signal)
+        if (disposed) return
+        setBuildings(list)
+        if (selection()[1] === 0) {
+          setSelection([NOW_INDEX, NOW_INDEX + DEFAULT_WINDOW_POINTS])
+        }
+        scan()
+      } catch {
+        if (!disposed && !controller.signal.aborted) window.setTimeout(loadBuildings, 60_000)
+      }
+    }
+
+    void loadBuildings()
+    const scanTimer = window.setInterval(scan, SCAN_INTERVAL_MS)
+    const nowTimer = window.setInterval(() => setNowMs(alignHour(Date.now())), NOW_TICK_MS)
 
     onCleanup(() => {
       disposed = true
-      window.clearInterval(refreshTimer)
+      controller.abort()
+      if (saveTimer !== undefined) window.clearTimeout(saveTimer)
+      window.clearInterval(scanTimer)
+      window.clearInterval(nowTimer)
       window.removeEventListener('resize', handleResize)
-      source.close()
     })
   })
 
   return (
     <div class="fixed inset-0 overflow-hidden bg-[#0a0c0f]">
-      <Index each={keys()}>
-        {(key) => {
-          const rect = createMemo(() => layout().get(key()))
-          const reading = createMemo(() => readings().get(key()))
-          return <Cell buildingKey={key()} rect={rect} reading={reading} />
+      <Index each={buildings()}>
+        {(building) => {
+          const rect = createMemo(() => layout().get(building().name))
+          const reading = createMemo(() => readings().get(building().name))
+          return <Cell buildingKey={building().name} rect={rect} reading={reading} />
         }}
       </Index>
-      <Show when={series()}>
-        {(value) => (
-          <CrowdTimeRangeSlider
-            startTimeMs={value().startTimeMs}
-            intervalMs={value().intervalMs}
-            pointCount={totalPoints(value())}
-            activity={activity()}
-            value={selection()}
-            onChange={setSelection}
-          />
-        )}
+      <Show when={buildings().length > 0}>
+        <CrowdTimeRangeSlider
+          startTimeMs={grid().startMs}
+          intervalMs={grid().intervalMs}
+          pointCount={grid().pointCount}
+          nowIndex={NOW_INDEX}
+          activity={activity()}
+          value={selection()}
+          onChange={setSelection}
+        />
       </Show>
     </div>
   )

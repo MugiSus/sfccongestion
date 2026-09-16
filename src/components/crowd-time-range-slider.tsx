@@ -1,4 +1,4 @@
-import { createMemo } from 'solid-js'
+import { Show, createMemo } from 'solid-js'
 import { Slider, SliderFill, SliderThumb, SliderTrack } from '@/components/ui/slider'
 
 const CURVE_WIDTH = 48
@@ -32,6 +32,7 @@ interface CrowdTimeRangeSliderProps {
   startTimeMs: number
   intervalMs: number
   pointCount: number
+  nowIndex?: number
   activity: number[]
   value: [number, number]
   onChange: (value: [number, number]) => void
@@ -125,6 +126,12 @@ export default function CrowdTimeRangeSlider(props: CrowdTimeRangeSliderProps) {
             vector-effect="non-scaling-stroke"
           />
         </svg>
+        <Show when={props.nowIndex !== undefined && maxValue() > 0}>
+          <div
+            class="absolute -left-5 right-0 border-t border-dashed border-primary/45"
+            style={{ top: `${((props.nowIndex ?? 0) / maxValue()) * 100}%` }}
+          />
+        </Show>
       </div>
       <SliderTrack class="data-[orientation=vertical]:before:-right-16">
         <SliderFill

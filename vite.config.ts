@@ -4,10 +4,10 @@ import solid from 'vite-plugin-solid'
 import tailwindcss from '@tailwindcss/vite'
 
 const proxy: Record<string, ProxyOptions> = {
-  '/api': {
-    target: 'https://api.dtc.wide.ad.jp',
+  '/api/crowd': {
+    target: 'https://crowd-api.sfc.sz7.jp',
     changeOrigin: true,
-    rewrite: (path) => path.replace(/^\/api/, ''),
+    rewrite: (path) => path.replace(/^\/api\/crowd/, ''),
   },
 }
 
