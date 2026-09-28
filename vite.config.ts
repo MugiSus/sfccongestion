@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url'
-import { defineConfig, type ProxyOptions } from 'vite'
+import { type ProxyOptions } from 'vite'
+import { defineConfig } from 'vitest/config'
 import solid from 'vite-plugin-solid'
 import tailwindcss from '@tailwindcss/vite'
 
@@ -20,4 +21,9 @@ export default defineConfig({
   },
   server: { proxy },
   preview: { proxy },
+  test: {
+    environment: 'happy-dom',
+    setupFiles: ['./tests/setup.ts'],
+    testTimeout: 15_000,
+  },
 })
