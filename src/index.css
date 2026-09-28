@@ -11,12 +11,3 @@
   --color-muted-foreground: #a1a1aa;
   --color-ring: #d4d4d8;
 }
-
-@utility cell-transition {
-  transition:
-    left 800ms cubic-bezier(0.22, 1, 0.36, 1),
-    top 800ms cubic-bezier(0.22, 1, 0.36, 1),
-    width 800ms cubic-bezier(0.22, 1, 0.36, 1),
-    height 800ms cubic-bezier(0.22, 1, 0.36, 1),
-    background-color 1000ms linear;
-}

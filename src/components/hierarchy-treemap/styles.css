@@ -1,0 +1,27 @@
+.hierarchy-treemap .cell-transition {
+  transition:
+    left 800ms cubic-bezier(0.22, 1, 0.36, 1),
+    top 800ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 800ms cubic-bezier(0.22, 1, 0.36, 1),
+    height 800ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 1000ms linear;
+}
+
+.hierarchy-treemap .treemap-cell {
+  border-radius: 4px;
+  contain: layout paint;
+}
+
+.hierarchy-treemap .treemap-label {
+  font-size: var(--label-size);
+  padding-inline: 4px;
+}
+
+.hierarchy-treemap .treemap-cell[role='img'] .treemap-label {
+  padding: var(--label-padding);
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.45);
+}
+
+.hierarchy-treemap .treemap-scene.is-zooming .treemap-cell {
+  transition-property: background-color;
+}

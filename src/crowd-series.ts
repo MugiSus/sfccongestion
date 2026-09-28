@@ -36,18 +36,18 @@ export function planCrowdRequests(
   selectedTime: number,
   nowMs: number,
 ) {
-  // Keep hourly overview samples alongside the single selected five-minute reading.
+  // Floors need the selected reading only; the hourly overview uses building totals.
   const timestamps = new Set<number>([selectedTime])
   const hour = 60 * 60 * 1000
   for (let time = Math.ceil(grid.startMs / hour) * hour; time <= grid.endMs; time += hour) timestamps.add(time)
   return [...timestamps].filter((time) => time >= grid.startMs && time <= grid.endMs)
     .sort((a, b) => Math.abs(a - selectedTime) - Math.abs(b - selectedTime))
     .flatMap((timestampMs) => targets
-      .filter((target) => target.forecastSupported || timestampMs <= nowMs)
+      .filter((target) => (target.area === null || timestampMs === selectedTime)
+        && (target.forecastSupported || timestampMs <= nowMs))
       .map((target) => ({
         target,
         timestampMs,
         selected: timestampMs === selectedTime,
       })))
 }
-
