@@ -11,4 +11,12 @@
   --color-secondary: rgb(255 255 255 / 0.18);
   --color-muted-foreground: #a1a1aa;
   --color-ring: #d4d4d8;
+
+  --animate-crowd-advice: crowd-advice linear infinite;
+
+  @keyframes crowd-advice {
+    to {
+      transform: translateX(var(--advice-offset));
+    }
+  }
 }

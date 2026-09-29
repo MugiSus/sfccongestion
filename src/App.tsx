@@ -1,5 +1,6 @@
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
 import { createQueries, createQuery, keepPreviousData } from '@tanstack/solid-query'
+import CrowdAdviceMarquee from '@/components/crowd-advice-marquee'
 import CrowdTimeSlider from '@/components/crowd-time-slider'
 import HierarchyTreemap from '@/components/hierarchy-treemap'
 import {
@@ -113,7 +114,8 @@ export default function App() {
 
   return (
     <>
-      <HierarchyTreemap data={data()} class="fixed inset-0" ariaLabel="棟・階別の推定人数" />
+      <HierarchyTreemap data={data()} class="fixed inset-x-0 top-0 bottom-5" ariaLabel="棟・階別の推定人数" />
+      <CrowdAdviceMarquee />
       <Show when={buildings().length > 0}>
         <CrowdTimeSlider startTimeMs={grid().startMs} intervalMs={CROWD_INTERVAL_MS}
           pointCount={grid().pointCount} nowIndex={grid().nowIndex}

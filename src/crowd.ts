@@ -73,6 +73,14 @@ export interface CrowdTree {
   }[]
 }
 
+export interface CrowdAdvice {
+  advice: string
+  generatedAt: number
+  forecastUntil: number
+  coveredBuildings: string[]
+  model: string
+}
+
 export class CrowdApiError extends Error {
   readonly status: number
   readonly code: string
@@ -159,6 +167,10 @@ export function crowdRetryDelay(attempt: number, error: Error): number {
 export async function fetchBuildings(signal: AbortSignal): Promise<CrowdBuilding[]> {
   const data = await requestJson<{ buildings: CrowdBuilding[] }>('/v1/buildings', signal, 2)
   return data.buildings
+}
+
+export function fetchCrowdAdvice(signal: AbortSignal): Promise<CrowdAdvice> {
+  return requestJson<CrowdAdvice>('/v1/crowd/advice', signal, 2)
 }
 
 export async function fetchCrowdTree(
