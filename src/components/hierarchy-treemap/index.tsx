@@ -242,13 +242,15 @@ export default function HierarchyTreemap(props: HierarchyTreemapProps) {
                 .join(' / ')} · ${valueLabel()}`;
             const header = createMemo(() => `${name()} · ${valueLabel()}`);
             const textWidth = createMemo(() => {
-              measurement.font = `600 ${LABEL_MAX_SIZE}px ${fontFamily()}`;
+              measurement.font = `${isLeaf() ? 400 : 600} ${LABEL_MAX_SIZE}px ${fontFamily()}`;
               const nameWidth = measurement.measureText(
                 isLeaf() ? name() : header(),
               ).width;
-              measurement.font = `400 ${LABEL_MAX_SIZE}px ${fontFamily()}`;
-              const countWidth = measurement.measureText(valueLabel()).width;
-              return isLeaf() ? Math.max(nameWidth, countWidth) : nameWidth;
+              measurement.font = `600 ${LABEL_MAX_SIZE}px ${fontFamily()}`;
+              const countWidth = measurement.measureText(
+                `${valueLabel()}・`,
+              ).width;
+              return isLeaf() ? nameWidth + countWidth : nameWidth;
             });
             const visible = createMemo(() => {
               const { x, y } = transform();
@@ -273,7 +275,7 @@ export default function HierarchyTreemap(props: HierarchyTreemapProps) {
                   : 0;
               const availableWidth = width() - LABEL_PADDING * 2;
               const availableHeight = height() - LABEL_PADDING * 2;
-              const lineHeight = 2.3;
+              const lineHeight = 1.15;
               if (
                 availableWidth <= 0 ||
                 availableHeight < LABEL_MIN_SIZE * lineHeight
@@ -334,11 +336,11 @@ export default function HierarchyTreemap(props: HierarchyTreemapProps) {
                       }}
                     >
                       <div class='truncate font-semibold'>
-                        {isLeaf() ? name() : header()}
+                        <Show when={isLeaf()} fallback={header()}>
+                          <span class='opacity-85'>{`${valueLabel()}・`}</span>
+                          <span class='font-normal'>{name()}</span>
+                        </Show>
                       </div>
-                      <Show when={isLeaf()}>
-                        <div class='truncate opacity-85'>{valueLabel()}</div>
-                      </Show>
                     </div>
                   )}
                 </Show>
