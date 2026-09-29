@@ -21,6 +21,8 @@ export interface TreemapDatum {
   valueLabel?: string;
   /** 矩形の色。省略時、末端は灰色、見出しは深さに応じた背景色です。 */
   color?: string;
+  /** 矩形の背景画像。CSSのグラデーションも指定できます。 */
+  backgroundImage?: string;
 }
 
 export const TREEMAP_PADDING = 3;

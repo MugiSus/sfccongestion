@@ -311,6 +311,7 @@ export default function HierarchyTreemap(props: HierarchyTreemapProps) {
                   '--cell-height': `${height()}px`,
                   '--enter-x': `${cell().enterX}px`,
                   '--enter-y': `${cell().enterY}px`,
+                  'background-image': node().data.backgroundImage,
                   'background-color':
                     node().data.color ??
                     (isLeaf()
