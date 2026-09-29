@@ -31,23 +31,14 @@ export function buildCrowdGrid(nowMs: number, forecastSupported = true): CrowdGr
 }
 
 export function planCrowdRequests(
-  targets: CrowdTarget[],
   grid: CrowdGrid,
   selectedTime: number,
-  nowMs: number,
 ) {
-  // Floors need the selected reading only; the hourly overview uses building totals.
+  // Each timestamp returns the whole tree for both the treemap and hourly overview.
   const timestamps = new Set<number>([selectedTime])
   const hour = 60 * 60 * 1000
   for (let time = Math.ceil(grid.startMs / hour) * hour; time <= grid.endMs; time += hour) timestamps.add(time)
   return [...timestamps].filter((time) => time >= grid.startMs && time <= grid.endMs)
     .sort((a, b) => Math.abs(a - selectedTime) - Math.abs(b - selectedTime))
-    .flatMap((timestampMs) => targets
-      .filter((target) => (target.area === null || timestampMs === selectedTime)
-        && (target.forecastSupported || timestampMs <= nowMs))
-      .map((target) => ({
-        target,
-        timestampMs,
-        selected: timestampMs === selectedTime,
-      })))
+    .map((timestampMs) => ({ timestampMs, selected: timestampMs === selectedTime }))
 }

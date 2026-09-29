@@ -28,9 +28,9 @@ export interface CrowdScope {
 }
 
 interface CrowdPointBase {
+  status: 'ok'
   timestamp: number
   intervalSeconds: 300
-  scope: CrowdScope
   estimatedPeople: number
   seatCapacity: number | null
   seatUtilization: number | null
@@ -56,12 +56,22 @@ export interface CrowdForecast extends CrowdPointBase {
   confidence: number
   modelVersion: string
   unmatchedLectureLocations: number
+  loungeOverflowDemand?: number
 }
 
 export type CrowdPoint = CrowdEstimate | CrowdForecast
 export type CrowdResult =
-  | { status: 'available', point: CrowdPoint }
-  | { status: 'unavailable' | 'unsupported', code: string, message: string }
+  | CrowdPoint
+  | { status: 'error', error: { code: 'DATA_UNAVAILABLE' | 'FORECAST_UNSUPPORTED', message: string } }
+
+export interface CrowdTree {
+  timestamp: number
+  buildings: {
+    name: string
+    crowd?: CrowdResult
+    areas: (Pick<CrowdArea, 'id' | 'kind' | 'label' | 'alias'> & { crowd: CrowdResult })[]
+  }[]
+}
 
 export class CrowdApiError extends Error {
   readonly status: number
@@ -124,9 +134,9 @@ async function requestJson<T>(path: string, signal: AbortSignal, priority: numbe
   })
 }
 
-export function prioritizeCrowdRequests(requests: { target: CrowdScope, timestampMs: number, selected: boolean }[]) {
+export function prioritizeCrowdRequests(requests: { timestampMs: number, selected: boolean }[]) {
   for (const request of requests) {
-    const id = JSON.stringify([request.target.building, request.target.area, request.timestampMs])
+    const id = String(request.timestampMs)
     const signal = queuedRequests.get(id)
     if (signal && !signal.aborted) requestQueue.setPriority(id, request.selected ? 1 : 0)
   }
@@ -151,52 +161,30 @@ export async function fetchBuildings(signal: AbortSignal): Promise<CrowdBuilding
   return data.buildings
 }
 
-export async function fetchCrowdPoint(
-  scope: CrowdScope,
+export async function fetchCrowdTree(
   timestampMs: number,
   signal: AbortSignal,
   priority = 1,
-): Promise<CrowdResult> {
+): Promise<CrowdTree> {
   const query = new URLSearchParams({
-    building: scope.building,
     timestamp: String(Math.floor(timestampMs / 1000)),
   })
-  if (scope.area !== null) query.set('area', scope.area)
-  try {
-    const point = await requestJson<CrowdPoint>(`/v1/crowd?${query}`, signal, priority,
-      JSON.stringify([scope.building, scope.area, timestampMs]))
-    return { status: 'available', point }
-  } catch (error) {
-    if (error instanceof CrowdApiError && (error.status === 404 || error.status === 422)) {
-      return {
-        status: error.status === 404 ? 'unavailable' : 'unsupported',
-        code: error.code,
-        message: error.message,
-      }
-    }
-    throw error
-  }
+  return requestJson<CrowdTree>(`/v1/crowd?${query}`, signal, priority, String(timestampMs))
 }
 
-export function crowdQueryOptions(scope: CrowdScope, timestampMs: number, nowMs: number, priority = 1) {
+export function crowdQueryOptions(timestampMs: number, nowMs: number, priority = 1) {
   const resultType = timestampMs <= nowMs ? 'estimate' : 'forecast'
+  // Only a complete, fresh observation tree can stop refreshing permanently.
+  const isFinalEstimate = (data: CrowdTree | undefined) => timestampMs + 2 * CROWD_INTERVAL_MS < Date.now()
+    && !!data?.buildings.length && data.buildings.every((building) =>
+      [building.crowd, ...building.areas.map((area) => area.crowd)].every((point) =>
+        point?.status === 'ok' && point.resultType === 'estimate' && point.dataFreshnessSeconds <= 300))
   return queryOptions({
     // A forecast must be replaced with an observation when its target time passes.
-    queryKey: ['crowd', scope.building, scope.area, timestampMs, resultType] as const,
-    queryFn: ({ signal }) => fetchCrowdPoint(scope, timestampMs, signal, priority),
-    staleTime: (query) => {
-      const data = query.state.data
-      return data?.status === 'available' && data.point.resultType === 'estimate'
-        && timestampMs + 2 * CROWD_INTERVAL_MS < Date.now()
-        && data.point.dataFreshnessSeconds <= 300
-        ? Infinity
-        : CROWD_INTERVAL_MS
-    },
-    refetchInterval: (query) => query.state.data?.status === 'available'
-      && query.state.data.point.resultType === 'estimate'
-      && timestampMs + 2 * CROWD_INTERVAL_MS < Date.now()
-      && query.state.data.point.dataFreshnessSeconds <= 300
-      ? false : CROWD_INTERVAL_MS,
+    queryKey: ['crowd-tree', timestampMs, resultType] as const,
+    queryFn: ({ signal }) => fetchCrowdTree(timestampMs, signal, priority),
+    staleTime: (query) => isFinalEstimate(query.state.data) ? Infinity : CROWD_INTERVAL_MS,
+    refetchInterval: (query) => isFinalEstimate(query.state.data) ? false : CROWD_INTERVAL_MS,
     gcTime: CROWD_HORIZON_MS,
     retry: retryCrowdRequest,
     retryDelay: crowdRetryDelay,

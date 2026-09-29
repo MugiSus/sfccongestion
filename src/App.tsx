@@ -44,25 +44,29 @@ export default function App() {
       forecastSupported: building.forecastSupported,
     })),
   ]))
-  const requests = createMemo(() => planCrowdRequests(targets(), grid(), timestamp(), nowMs()))
+  const requests = createMemo(() => planCrowdRequests(grid(), timestamp()))
   const queries = createQueries(() => ({
     queries: requests().map((request) => crowdQueryOptions(
-      request.target, request.timestampMs, nowMs(), request.selected ? 1 : 0,
+      request.timestampMs, nowMs(), request.selected ? 1 : 0,
     )),
   }))
   createEffect(() => prioritizeCrowdRequests(requests()))
   const samples = createMemo(() => {
     const result = new Map<string, CrowdSample>()
     requests().forEach((request, index) => {
-      result.set(`${request.target.key}|${request.timestampMs}`, queries[index] ?? {})
+      const query = queries[index]
+      for (const building of query?.data?.buildings ?? []) {
+        result.set(`${building.name}|${request.timestampMs}`, { data: building.crowd, error: query?.error })
+        for (const area of building.areas) {
+          result.set(`${building.name}/${area.id}|${request.timestampMs}`, { data: area.crowd, error: query?.error })
+        }
+      }
     })
     return result
   })
   const currentSamples = createMemo(() => new Map(targets().map((target) => [
     target.key,
-    !target.forecastSupported && timestamp() > nowMs()
-      ? { data: { status: 'unsupported', code: 'FORECAST_UNSUPPORTED', message: '予測非対応' } } as CrowdSample
-      : samples().get(`${target.key}|${timestamp()}`),
+    samples().get(`${target.key}|${timestamp()}`),
   ])))
   const activity = createMemo(() => {
     const hour = 60 * 60 * 1000
@@ -73,7 +77,7 @@ export default function App() {
       for (const target of targets()) {
         if (target.area !== null || (!target.forecastSupported && time > nowMs())) continue
         const data = samples().get(`${target.key}|${time}`)?.data
-        if (data?.status === 'available') people += data.point.estimatedPeople
+        if (data?.status === 'ok') people += data.estimatedPeople
         else complete = false
       }
       points.push({ index: (time - grid().startMs) / CROWD_INTERVAL_MS, people: complete ? people : null })
