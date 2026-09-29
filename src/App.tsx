@@ -42,7 +42,7 @@ export default function App() {
     },
     ...building.areas.filter((area) => area.kind === 'floor').map((area) => ({
       building: building.name, area: area.id, key: `${building.name}/${area.id}`,
-      label: `${building.name}・${area.id}`,
+      label: `${building.name}-${area.id}`,
       forecastSupported: building.forecastSupported,
     })),
   ]))
