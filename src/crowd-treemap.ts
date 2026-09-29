@@ -21,7 +21,7 @@ export function buildCrowdTreemapData(
       color: point?.seatUtilization == null ? 'hsl(215 10% 30%)'
         : `hsl(${(1 - Math.min(Math.max(point.seatUtilization, 0), 1)) * 130} 68% 41%)`,
       backgroundImage: point?.seatCapacity === null
-        ? 'repeating-linear-gradient(45deg, transparent 0 8px, hsl(215 10% 50%) 8px 16px)' : undefined,
+        ? 'repeating-linear-gradient(45deg, transparent 0 8px, hsl(215 10% 40%) 8px 16px)' : undefined,
     })
   }
   for (const building of targets.filter((target) => target.area === null)) {
