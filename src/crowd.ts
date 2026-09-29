@@ -1,7 +1,7 @@
 import { queryOptions } from '@tanstack/solid-query'
 import PQueue from 'p-queue'
 
-const CROWD_URL = '/api/crowd'
+const CROWD_URL = 'https://crowd-api.sfc.sz7.jp'
 export const CROWD_INTERVAL_MS = 5 * 60 * 1000
 export const CROWD_HORIZON_MS = 24 * 60 * 60 * 1000
 
