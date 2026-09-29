@@ -1,4 +1,5 @@
 import { select } from 'd3-selection';
+import type { HierarchyRectangularNode } from 'd3-hierarchy';
 import { zoom, zoomIdentity, type D3ZoomEvent } from 'd3-zoom';
 import {
   For,
@@ -34,6 +35,18 @@ const LABEL_PADDING = 8;
 const LABEL_MIN_SIZE = 10;
 const LABEL_MAX_SIZE = 32;
 const HEADER_SIZE = 12;
+
+interface TreemapCell {
+  node: HierarchyRectangularNode<TreemapDatum>;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  present: boolean;
+  animateEntry: boolean;
+  enterX: number;
+  enterY: number;
+}
 
 /**
  * JSON配列を描画するSolidJSとD3の階層ツリーマップ。
@@ -78,10 +91,56 @@ export default function HierarchyTreemap(props: HierarchyTreemapProps) {
       .descendants()
       .slice(1);
   });
-  const nodeIds = createMemo(() => layout().map((node) => node.data.id));
-  const nodes = createMemo(
-    () => new Map(layout().map((node) => [node.data.id, node])),
-  );
+  const elements = new Map<string, HTMLDivElement>();
+  const nodes = createMemo((previous: Map<string, TreemapCell>) => {
+    // Preserve DOM order across sorting changes; moving elements can restart
+    // their entry transitions and briefly cover sibling cells.
+    const next = new Map(
+      [...previous].map(([id, cell]) => [id, { ...cell, present: false }]),
+    );
+    const right = Math.max(0, viewport().width * scale() - TREEMAP_PADDING);
+    const bottom = Math.max(0, viewport().height * scale() - TREEMAP_PADDING);
+    // D3 visits parents before children, so a new subtree shares one origin.
+    for (const node of layout()) {
+      const old = previous.get(node.data.id);
+      const parentId = node.parent?.data.id;
+      const parent = parentId ? next.get(parentId) : undefined;
+      const parentElement = parentId ? elements.get(parentId) : undefined;
+      let enterX = old?.enterX ?? parent?.enterX ?? right;
+      let enterY = old?.enterY ?? parent?.enterY ?? bottom;
+      if (!old && parentElement) {
+        // Read the in-flight geometry when data arrives during a transition.
+        const style = getComputedStyle(parentElement);
+        enterX = parseFloat(style.left) + Math.max(0, parseFloat(style.width) - TREEMAP_PADDING);
+        enterY = parseFloat(style.top) + Math.max(0, parseFloat(style.height) - TREEMAP_PADDING);
+      }
+      next.set(node.data.id, {
+        node,
+        x0: node.x0,
+        y0: node.y0,
+        x1: node.x1,
+        y1: node.y1,
+        present: true,
+        animateEntry: old?.animateEntry ?? previous.size > 0,
+        enterX,
+        enterY,
+      });
+    }
+    for (const [id, old] of previous) {
+      if (next.get(id)?.present) continue;
+      let ancestor = old.node.parent;
+      while (ancestor && !next.get(ancestor.data.id)?.present)
+        ancestor = ancestor.parent;
+      const parent = ancestor ? next.get(ancestor.data.id) : undefined;
+      const x = parent ? Math.max(parent.x0, parent.x1 - TREEMAP_PADDING) : right;
+      const y = parent ? Math.max(parent.y0, parent.y1 - TREEMAP_PADDING) : bottom;
+      // Keep the keyed DOM cell at zero area, including every child of a
+      // disappearing branch. Reappearance then uses its current CSS geometry.
+      next.set(id, { ...old, x0: x, y0: y, x1: x, y1: y, present: false });
+    }
+    return next;
+  }, new Map<string, TreemapCell>());
+  const nodeIds = createMemo(() => [...nodes().keys()]);
 
   onMount(() => {
     setFontFamily(getComputedStyle(container).fontFamily);
@@ -159,13 +218,15 @@ export default function HierarchyTreemap(props: HierarchyTreemapProps) {
       >
         <For each={nodeIds()}>
           {(id) => {
-            const node = () => nodes().get(id)!;
+            const cell = () => nodes().get(id)!;
+            const node = () => cell().node;
+            onCleanup(() => elements.delete(id));
             const isLeaf = createMemo(() => !node().children?.length);
             const valueLabel = createMemo(
               () => node().data.valueLabel ?? String(node().value ?? 0),
             );
-            const width = () => node().x1 - node().x0;
-            const height = () => node().y1 - node().y0;
+            const width = () => cell().x1 - cell().x0;
+            const height = () => cell().y1 - cell().y0;
             const name = createMemo(
               () => node().data.label ?? node().data.name,
             );
@@ -188,8 +249,9 @@ export default function HierarchyTreemap(props: HierarchyTreemapProps) {
             });
             const visible = createMemo(() => {
               const { x, y } = transform();
-              const current = node();
+              const current = cell();
               return (
+                current.present &&
                 current.x1 + x > 0 &&
                 current.x0 + x < viewport().width &&
                 current.y1 + y > 0 &&
@@ -229,16 +291,21 @@ export default function HierarchyTreemap(props: HierarchyTreemapProps) {
 
             return (
               <div
+                ref={(element) => elements.set(id, element)}
                 class='treemap-cell cell-transition absolute overflow-hidden'
                 classList={{ 'flex items-center justify-center': isLeaf() }}
-                title={title()}
+                title={cell().present ? title() : undefined}
+                aria-hidden={!cell().present || undefined}
+                data-enter={cell().animateEntry || undefined}
                 role={isLeaf() ? 'img' : undefined}
                 aria-label={isLeaf() ? title() : undefined}
                 style={{
-                  left: `${node().x0}px`,
-                  top: `${node().y0}px`,
-                  width: `${width()}px`,
-                  height: `${height()}px`,
+                  '--cell-x': `${cell().x0}px`,
+                  '--cell-y': `${cell().y0}px`,
+                  '--cell-width': `${width()}px`,
+                  '--cell-height': `${height()}px`,
+                  '--enter-x': `${cell().enterX}px`,
+                  '--enter-y': `${cell().enterY}px`,
                   'background-color':
                     node().data.color ??
                     (isLeaf()

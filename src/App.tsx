@@ -95,7 +95,9 @@ export default function App() {
     }
     return points
   })
-  const data = createMemo(() => buildCrowdTreemapData(targets(), currentSamples()))
+  // The first observation is drawn directly, without animating placeholder weights.
+  const data = createMemo(() => currentQuery.data
+    ? buildCrowdTreemapData(targets(), currentSamples()) : [])
 
   onMount(() => {
     const timer = window.setInterval(() => setNowMs(Date.now()), 30_000)

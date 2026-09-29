@@ -8,8 +8,25 @@
 }
 
 .hierarchy-treemap .treemap-cell {
+  left: var(--cell-x);
+  top: var(--cell-y);
+  width: var(--cell-width);
+  height: var(--cell-height);
   border-radius: 4px;
   contain: layout paint;
+}
+
+@starting-style {
+  .hierarchy-treemap .treemap-cell[data-enter] {
+    left: var(--enter-x);
+    top: var(--enter-y);
+    width: 0;
+    height: 0;
+  }
+}
+
+.hierarchy-treemap .treemap-cell[aria-hidden='true'] {
+  pointer-events: none;
 }
 
 .hierarchy-treemap .treemap-label {
