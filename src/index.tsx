@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/solid-query'
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister'
 import { persistQueryClient, removeOldestQuery } from '@tanstack/query-persist-client-core'
 import { CROWD_HORIZON_MS, type CrowdTree } from './crowd'
+import '@fontsource-variable/inter'
 import './index.css'
 import App from './App.tsx'
 

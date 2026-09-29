@@ -1,8 +1,9 @@
 @import 'tailwindcss';
 
 @theme {
-  --font-sans:
-    'Inter', 'Helvetica Neue', 'Hiragino Sans', 'Noto Sans JP', system-ui, sans-serif;
+  --font-sans: 'Inter Variable', sans-serif;
+  --font-serif: var(--font-sans);
+  --font-mono: var(--font-sans);
 
   --color-background: #0a0c0f;
   --color-foreground: #f4f4f5;
