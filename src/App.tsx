@@ -1,5 +1,5 @@
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
-import { createQueries, createQuery } from '@tanstack/solid-query'
+import { createQueries, createQuery, keepPreviousData } from '@tanstack/solid-query'
 import CrowdTimeSlider from '@/components/crowd-time-slider'
 import HierarchyTreemap from '@/components/hierarchy-treemap'
 import {
@@ -44,6 +44,11 @@ export default function App() {
       forecastSupported: building.forecastSupported,
     })),
   ]))
+  // Retain the displayed tree while a newly selected timestamp is loading.
+  const currentQuery = createQuery(() => ({
+    ...crowdQueryOptions(timestamp(), nowMs()),
+    placeholderData: keepPreviousData,
+  }))
   const requests = createMemo(() => planCrowdRequests(grid(), timestamp()))
   const queries = createQueries(() => ({
     queries: requests().map((request) => crowdQueryOptions(
@@ -64,10 +69,16 @@ export default function App() {
     })
     return result
   })
-  const currentSamples = createMemo(() => new Map(targets().map((target) => [
-    target.key,
-    samples().get(`${target.key}|${timestamp()}`),
-  ])))
+  const currentSamples = createMemo(() => {
+    const result = new Map<string, CrowdSample>()
+    for (const building of currentQuery.data?.buildings ?? []) {
+      result.set(building.name, { data: building.crowd })
+      for (const area of building.areas) {
+        result.set(`${building.name}/${area.id}`, { data: area.crowd })
+      }
+    }
+    return result
+  })
   const activity = createMemo(() => {
     const hour = 60 * 60 * 1000
     const points: { index: number, people: number | null }[] = []
