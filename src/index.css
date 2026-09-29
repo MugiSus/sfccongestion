@@ -1,7 +1,7 @@
 @import 'tailwindcss';
 
 @theme {
-  --font-sans: 'Inter Variable', sans-serif;
+  --font-sans: 'Inter Variable', 'Noto Sans JP Variable', sans-serif;
   --font-serif: var(--font-sans);
   --font-mono: var(--font-sans);
 

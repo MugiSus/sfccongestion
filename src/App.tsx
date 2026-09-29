@@ -114,7 +114,7 @@ export default function App() {
 
   return (
     <>
-      <HierarchyTreemap data={data()} class="fixed inset-x-0 top-0 bottom-5" ariaLabel="棟・階別の推定人数" />
+      <HierarchyTreemap data={data()} class="fixed inset-x-0 top-0 bottom-6" ariaLabel="棟・階別の推定人数" />
       <CrowdAdviceMarquee />
       <Show when={buildings().length > 0}>
         <CrowdTimeSlider startTimeMs={grid().startMs} intervalMs={CROWD_INTERVAL_MS}

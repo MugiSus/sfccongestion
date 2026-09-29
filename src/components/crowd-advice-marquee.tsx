@@ -40,7 +40,7 @@ export default function CrowdAdviceMarquee() {
   })
 
   return (
-    <div ref={container} class="fixed inset-x-0 bottom-0 h-5 overflow-hidden bg-background text-base leading-5 text-foreground">
+    <div ref={container} class="fixed inset-x-0 bottom-0 h-6 overflow-hidden bg-background text-base leading-6 text-foreground">
       <div
         class="flex w-max animate-crowd-advice motion-reduce:animate-none"
         style={{

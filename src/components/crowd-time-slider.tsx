@@ -1,4 +1,4 @@
-import { Show, createMemo } from 'solid-js'
+import { Show, createMemo, onCleanup, onMount } from 'solid-js'
 import { Slider, SliderFill, SliderThumb, SliderTrack } from '@/components/ui/slider'
 
 const CURVE_WIDTH = 48
@@ -41,6 +41,38 @@ export default function CrowdTimeSlider(props: CrowdTimeSliderProps) {
   const maxValue = () => maxSelectableIndex(props.pointCount, stepSize())
   const formatTime = (index: number) =>
     TIME_FORMATTER.format(new Date(props.startTimeMs + index * props.intervalMs))
+
+  onMount(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return
+      const target = event.target
+      if (target instanceof HTMLElement && (
+        target.isContentEditable || target.closest('input, textarea, select')
+      )) return
+
+      let direction: number
+      switch (event.key) {
+        case 'ArrowUp':
+        case 'ArrowLeft':
+          direction = -1
+          break
+        case 'ArrowDown':
+        case 'ArrowRight':
+          direction = 1
+          break
+        default:
+          return
+      }
+
+      event.preventDefault()
+      event.stopPropagation()
+      props.onChange(Math.max(0, Math.min(maxValue(), props.value + direction * stepSize())))
+    }
+
+    // Handle arrows before Kobalte so a focused thumb does not also change the value.
+    window.addEventListener('keydown', handleKeyDown, true)
+    onCleanup(() => window.removeEventListener('keydown', handleKeyDown, true))
+  })
 
   const curvePath = createMemo(() => {
     const activity = props.activity
