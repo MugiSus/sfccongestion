@@ -100,7 +100,12 @@ export default function CrowdTimeSlider(props: CrowdTimeSliderProps) {
         </Show>
       </div>
       <SliderTrack class="data-[orientation=vertical]:before:-right-16">
-        <SliderFill />
+        <SliderFill
+          style={{
+            top: `${Math.min(50, (props.value / Math.max(1, maxValue())) * 100)}%`,
+            bottom: `${100 - Math.max(50, (props.value / Math.max(1, maxValue())) * 100)}%`,
+          }}
+        />
         <SliderThumb class={THUMB_CLASS} aria-label="表示時刻" aria-valuetext={formatTime(props.value)}>
           <span class={LABEL_CLASS}>{formatTime(props.value)}</span>
         </SliderThumb>
